@@ -1,7 +1,8 @@
 import { CustomError } from "@/middlewares/errorHandler";
 import { getExample } from "@/models/exampleModel";
 import RabbitMqConnection from "@/models/RabbitMqConnection";
-import { returnSuccess } from "@/utils/responseUtil";
+import RedisConnection from "@/models/RedisConnection";
+import { returnSuccess, sendResponse } from "@/utils/responseUtil";
 import { NextFunction, Request, Response } from "express";
 
 export const assertConvertQueueController = async (
@@ -33,10 +34,12 @@ export const assertConvertQueueController = async (
       mimetype: file.mimetype,
       size: file.size,
       options,
+      status: "queued",
     }));
 
     for (const job of jobs) {
       await RabbitMqConnection.sendToQueue("image_conversion", job);
+      await RedisConnection.set(`job:${job.id}`, JSON.stringify(job));
     }
 
     return returnSuccess({
@@ -49,6 +52,33 @@ export const assertConvertQueueController = async (
           path: job.path,
           options,
         })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getJobStatusController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { jobId } = req.params;
+
+    const jobData = await RedisConnection.get(`job:${jobId}`);
+    if (!jobData) {
+      return sendResponse(res, 404, "해당 job이 없음");
+    }
+
+    const job = JSON.parse(jobData);
+
+    return returnSuccess({
+      res,
+      data: {
+        status: job.status,
+        result: job.result,
       },
     });
   } catch (error) {
