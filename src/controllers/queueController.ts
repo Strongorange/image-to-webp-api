@@ -4,6 +4,8 @@ import RabbitMqConnection from "@/models/RabbitMqConnection";
 import RedisConnection from "@/models/RedisConnection";
 import { returnSuccess, sendResponse } from "@/utils/responseUtil";
 import { NextFunction, Request, Response } from "express";
+import fs from "fs";
+import path from "path";
 
 export const assertConvertQueueController = async (
   req: Request,
@@ -81,6 +83,50 @@ export const getJobStatusController = async (
         result: job.result,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const downloadImgController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { jobId } = req.params;
+
+    const jobData = await RedisConnection.get(`job:${jobId}`);
+    if (!jobData) {
+      return sendResponse(res, 404, "해당 job 없음");
+    }
+
+    const job = JSON.parse(jobData);
+
+    if (job.status !== "completed") {
+      return sendResponse(res, 400, "이미지 변환 작업 진행중");
+    }
+
+    const filePath = job.result.path;
+
+    if (!fs.existsSync(filePath)) {
+      return sendResponse(res, 404, "파일이 없음");
+    }
+
+    const fileName = path.basename(filePath);
+    const encodedFileName = encodeURIComponent(fileName).replace(
+      /['()]/g,
+      escape
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodedFileName}`
+    );
+    res.setHeader("Content-Type", "image/webp");
+
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
   } catch (error) {
     next(error);
   }
